@@ -40,11 +40,11 @@ class Topic(BaseModel):
         self.subscriptions_confimed = 0
         self.subscriptions_deleted = 0
 
-    def publish(self, message):
+    def publish(self, message, **kwargs):
         message_id = six.text_type(uuid.uuid4())
         subscriptions, _ = self.sns_backend.list_subscriptions(self.arn)
         for subscription in subscriptions:
-            subscription.publish(message, message_id)
+            subscription.publish(message, message_id, **kwargs)
         return message_id
 
     def get_cfn_attribute(self, attribute_name):
@@ -81,14 +81,14 @@ class Subscription(BaseModel):
         self.attributes = {}
         self.confirmed = False
 
-    def publish(self, message, message_id):
+    def publish(self, message, message_id, **kwargs):
         if self.protocol == 'sqs':
             queue_name = self.endpoint.split(":")[-1]
             region = self.endpoint.split(":")[3]
-            enveloped_message = json.dumps(self.get_post_data(message, message_id), sort_keys=True, indent=2, separators=(',', ': '))
+            enveloped_message = json.dumps(self.get_post_data(message, message_id, **kwargs), sort_keys=True, indent=2, separators=(',', ': '))
             sqs_backends[region].send_message(queue_name, enveloped_message)
         elif self.protocol in ['http', 'https']:
-            post_data = self.get_post_data(message, message_id)
+            post_data = self.get_post_data(message, message_id, **kwargs)
             requests.post(self.endpoint, json=post_data)
         elif self.protocol == 'lambda':
             # TODO: support bad function name
@@ -96,8 +96,8 @@ class Subscription(BaseModel):
             region = self.arn.split(':')[3]
             lambda_backends[region].send_message(function_name, message)
 
-    def get_post_data(self, message, message_id):
-        return {
+    def get_post_data(self, message, message_id, **kwargs):
+        body = {
             "Type": "Notification",
             "MessageId": message_id,
             "TopicArn": self.topic.arn,
@@ -109,6 +109,8 @@ class Subscription(BaseModel):
             "SigningCertURL": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-f3ecfb7224c7233fe7bb5f59f96de52f.pem",
             "UnsubscribeURL": "https://sns.us-east-1.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=arn:aws:sns:us-east-1:123456789012:some-topic:2bcfbf39-05c3-41de-beaa-fcfcc21c8f55"
         }
+        body.update(kwargs)
+        return body
 
 
 class PlatformApplication(BaseModel):
@@ -256,16 +258,16 @@ class SNSBackend(BaseBackend):
         else:
             return self._get_values_nexttoken(self.subscriptions, next_token)
 
-    def publish(self, arn, message, subject=None):
+    def publish(self, arn, message, subject=None, **kwargs):
         if subject is not None and len(subject) >= 100:
             raise ValueError('Subject must be less than 100 characters')
 
         try:
             topic = self.get_topic(arn)
-            message_id = topic.publish(message)
+            message_id = topic.publish(message, **kwargs)
         except SNSNotFoundError:
             endpoint = self.get_endpoint(arn)
-            message_id = endpoint.publish(message)
+            message_id = endpoint.publish(message, **kwargs)
         return message_id
 
     def create_platform_application(self, region, name, platform, attributes):

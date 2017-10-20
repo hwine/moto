@@ -265,7 +265,7 @@ class SNSResponse(BaseResponse):
         message = self._get_param('Message')
 
         try:
-            message_id = self.backend.publish(arn, message, subject=subject)
+            message_id = self.backend.publish(arn, message, Subject=subject)
         except ValueError as err:
             error_response = self._error('InvalidParameter', str(err))
             return error_response, dict(status=400)
